@@ -8,20 +8,22 @@ import reads a local file.
 ## Isolation rules
 
 - Own stack (`MoonswitchStack`), own DynamoDB table, own API + API key, own S3 buckets.
-- Own Streamlit Cloud app: main file `moonswitch/app.py`, own `requirements.txt`, own URL and
-  email allowlist.
+- Own Streamlit Cloud app: main file `app/app.py`, own `requirements.txt`, own URL and email
+  allowlist.
 - **Copy, don't import**, from the JDM code (db helpers, config loader, fee math, watch-picker
   pattern). A few dozen duplicated lines are cheaper than one business's change breaking the other.
-- Own `moonswitch/CLAUDE.md`; the root `CLAUDE.md` stays JDM + a pointer.
+- Own **private repo** (`C:\dev\moonswitch`), own `.venv`, own `CLAUDE.md`. Nothing here touches
+  the JDM repo.
 
 ```
-moonswitch/
+moonswitch/            # repo root
   CLAUDE.md  DESIGN.md
   cdk/        # MoonswitchStack
   lambdas/    # builds, parts, orders, sales, config, reports (+ shared/)
   app/        # Streamlit (app.py + pages/)
   config/config.json   # channels, fee rates, listing template, targets
-  scripts/    # import_excel.py (local file, dry-run default)
+  scripts/    # import_excel.py (reads gitignored data/, dry-run default)
+  data/       # gitignored: the original Excel
 ```
 
 ## Data model (single table)
