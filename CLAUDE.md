@@ -48,7 +48,7 @@ the next step; nothing is built yet.
 - Parts are individual records; unassigned delivered parts are stock (e.g. spare bezel
   inserts). Stems/spacers are deliberately not tracked. Own time/hours: optional only.
 - Listing text for Facebook is generated from a config template with placeholders (no FB API).
-- No-shows aren't recorded; a refund = move the build back to `listed` with a note.
+- No-shows aren't recorded; a refund = move the build back to `parts_ready` with a note (no refunds so far).
 
 ## About the source spreadsheet (`data/moonswitch_control.xlsx`)
 

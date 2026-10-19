@@ -2,7 +2,7 @@
 
 Separate business from the JDM watches: sources parts (AliExpress/DHGate), assembles ("recases")
 modded watches, flips them on Facebook Marketplace. Replaces the `2026_08` tab of the control
-spreadsheet. Public repo → **no real figures, links or buyer data in the repo**; the Excel
+spreadsheet. Repo visibility is Paulo's call (Streamlit Cloud deploys private repos too) → **no real figures, links or buyer data in the repo**; the Excel
 import reads a local file.
 
 ## Isolation rules
@@ -12,7 +12,7 @@ import reads a local file.
   allowlist.
 - **Copy, don't import**, from the JDM code (db helpers, config loader, fee math, watch-picker
   pattern). A few dozen duplicated lines are cheaper than one business's change breaking the other.
-- Own **private repo** (`C:\dev\moonswitch`), own `.venv`, own `CLAUDE.md`. Nothing here touches
+- Own repo (`C:\dev\moonswitch`), own `.venv`, own `CLAUDE.md`. Nothing here touches
   the JDM repo.
 
 ```
@@ -88,5 +88,5 @@ a few iterations on real orders.
 
 ## Not modelled (on purpose)
 
-No-shows (no record) and old `Sheet1` statuses. A refund = move the build back to `listed`
+No-shows (no record) and old `Sheet1` statuses. A refund = move the build back to `parts_ready`
 with a note; if that becomes frequent, add a proper refund record.

@@ -1,0 +1,13 @@
+{
+  "_comment": "Moonswitch machine config. Bundled into the api Lambda at deploy time; changes need a redeploy (config is cached per cold start). Channels: fee_rate applies to (sale price + shipping charged + buyer tax) when fee_on_tax is true.",
+
+  "default_sales_tax_pct": "8",
+  "default_channel": "fb_checkout",
+  "est_label_cost_usd": "10",
+
+  "channels": {
+    "fb_checkout": {"label": "Facebook checkout", "fee_rate": "0.10",   "fee_flat_usd": "0", "fee_on_tax": true},
+    "paypal":      {"label": "PayPal",            "fee_rate": "0.0299", "fee_flat_usd": "0", "fee_on_tax": true},
+    "direct":      {"label": "Zelle/Venmo/cash",  "fee_rate": "0",      "fee_flat_usd": "0", "fee_on_tax": false}
+  }
+}
