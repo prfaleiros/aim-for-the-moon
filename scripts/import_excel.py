@@ -28,7 +28,7 @@ from core.money import safe_decimal  # noqa: E402
 XLSX = ROOT / "data" / "moonswitch_control.xlsx"
 OVERRIDES = ROOT / "data" / "import_overrides.csv"
 FAMILIES = ROOT / "config" / "families.csv"
-CFG = {k: v for k, v in json.loads((ROOT / "config" / "config.json").read_text()).items() if not k.startswith("_")}
+CFG = {k: v for k, v in json.loads((ROOT / "config" / "config.json").read_text(encoding="utf-8")).items() if not k.startswith("_")}
 
 # (category, model col, color col, price col, status col) on tab 2026_08
 GROUPS = [("case", 2, 3, 4, 5), ("bezel_insert", 6, 7, 8, 9), ("bracelet", 10, 11, 12, 13),

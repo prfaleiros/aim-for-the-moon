@@ -7,10 +7,10 @@ from datetime import date
 import db
 import repo
 from config import load_config
-from core import costs, fees, lifecycle
+from core import costs, fees, lifecycle, listing
 from core.money import safe_decimal, q
 
-BUILD_FIELDS = {"nickname", "family", "type", "target_price", "list_price", "notes", "thumbnail_key", "hours"}
+BUILD_FIELDS = {"nickname", "family", "type", "target_price", "list_price", "notes", "thumbnail_key", "hours", "listing_url"}
 PART_FIELDS = {"category", "description", "link", "color", "cost_usd", "included_with_case",
                "status", "order_id", "build_id"}
 SALE_FIELDS = ("item_price", "shipping_charged", "sales_tax", "channel", "fee_usd", "label_cost",
@@ -89,6 +89,8 @@ def update_build(body, _q, bid):
         db.put({"PK": f"BUILD#{bid}", "SK": f"PRICE#{lifecycle.now_iso()}",
                 "from": b.get("list_price"), "to": upd["list_price"]})
     b.update(upd)
+    if "listing" in body:
+        b["listing"] = listing.clean_fields(body["listing"])
     db.put(repo.build_item(repo.strip(b)))
     return 200, repo.strip(b)
 
@@ -104,9 +106,23 @@ def transition_build(body, _q, bid):
         raise HttpError(400, str(e))
     old = b["status"]
     if new == "listed":
-        if not safe_decimal(b.get("list_price")):
-            raise HttpError(400, "set a list_price before listing")
-        upd["estimated_net_payout"] = fees.estimated_net_payout(load_config(), b["list_price"])
+        cfg = load_config()
+        prices = {f: _num(body[f]) for f in ("target_price", "list_price") if body.get(f) not in (None, "")}
+        target = safe_decimal(prices.get("target_price", b.get("target_price")))
+        price = safe_decimal(prices.get("list_price", b.get("list_price")))
+        if target <= 0 or price <= 0:
+            raise HttpError(400, "target price and list price must both be set (above $0) before listing")
+        parts = repo.parts_of(db, bid)
+        fields = listing.merge_fields(listing.prefill(cfg, b, parts), {**(b.get("listing") or {}), **(body.get("listing") or {})})
+        missing = listing.render(cfg, fields, price)["missing"]
+        if missing:
+            raise HttpError(400, "listing details missing: " + ", ".join(listing.LABELS[m] for m in missing))
+        if "list_price" in prices and prices["list_price"] != b.get("list_price"):
+            db.put({"PK": f"BUILD#{bid}", "SK": f"PRICE#{lifecycle.now_iso()}",
+                    "from": b.get("list_price"), "to": prices["list_price"]})
+        upd.update(prices)
+        upd["listing"] = listing.clean_fields(fields)
+        upd["estimated_net_payout"] = fees.estimated_net_payout(cfg, price)
     if new == "parts_ready" and old != "sold":
         if any(p.get("status") != "delivered" for p in repo.parts_of(db, bid)):
             raise HttpError(400, "not all parts are delivered")
@@ -249,6 +265,30 @@ def get_config(_body, _q):
     return 200, load_config()
 
 
+def _listing_view(b, parts, fields, price):
+    cfg = load_config()
+    out = listing.render(cfg, fields, price)
+    out.update(fields=fields, payouts=listing.payouts(cfg, price, costs.build_cost(parts)),
+               labels=listing.LABELS, required=listing.REQUIRED)
+    return out
+
+
+def get_listing(_body, _q, bid):
+    b = _get_build(bid)
+    parts = repo.parts_of(db, bid)
+    fields = listing.merge_fields(listing.prefill(load_config(), b, parts), b.get("listing"))
+    return 200, _listing_view(b, parts, fields, b.get("list_price"))
+
+
+def preview_listing(body, _q, bid):
+    """Render with unsaved edits and a candidate price; nothing is written."""
+    b = _get_build(bid)
+    parts = repo.parts_of(db, bid)
+    fields = listing.merge_fields(listing.prefill(load_config(), b, parts), body.get("fields"))
+    price = body.get("list_price") if body.get("list_price") not in (None, "") else b.get("list_price")
+    return 200, _listing_view(b, parts, fields, price)
+
+
 ROUTES = [
     ("GET", r"/builds", list_builds),
     ("POST", r"/builds", create_build),
@@ -256,6 +296,8 @@ ROUTES = [
     ("PATCH", r"/builds/(?P<bid>[^/]+)", update_build),
     ("POST", r"/builds/(?P<bid>[^/]+)/transition", transition_build),
     ("POST", r"/builds/(?P<bid>[^/]+)/close", close_sale),
+    ("GET", r"/builds/(?P<bid>[^/]+)/listing", get_listing),
+    ("POST", r"/builds/(?P<bid>[^/]+)/listing-preview", preview_listing),
     ("POST", r"/parts", create_part),
     ("PATCH", r"/parts/(?P<pid>[^/]+)", update_part),
     ("DELETE", r"/parts/(?P<pid>[^/]+)", delete_part),

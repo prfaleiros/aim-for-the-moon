@@ -2,9 +2,9 @@ import sys, json, pathlib
 sys.path.insert(0, str(pathlib.Path(__file__).parent.parent / "lambdas" / "api"))
 
 import pytest
-from core import fees, costs, lifecycle
+from core import fees, costs, lifecycle, listing
 
-CFG = json.loads((pathlib.Path(__file__).parent.parent / "config" / "config.json").read_text())
+CFG = json.loads((pathlib.Path(__file__).parent.parent / "config" / "config.json").read_text(encoding="utf-8"))
 
 
 def test_fb_fee_on_price_plus_shipping_plus_tax():
@@ -63,3 +63,30 @@ def test_transitions_stamp_dates_and_refund():
     assert refund["status"] == "parts_ready" and refund["refund_note"] == "buyer returned"
     with pytest.raises(ValueError):
         lifecycle.transition({"status": "designed"}, "sold")
+
+
+def test_listing_render_and_extras():
+    f = {"model": "1969 YG", "inspired": "Speedmaster", "aesthetics": "a gold bezel", "case": "gold",
+         "bracelet": "gold stainless steel", "dial_color": "black", "bezel": "black tachymeter",
+         "extras": "* extra rubber strap\nlume hands"}
+    r = listing.render(CFG, f, 249.5)
+    assert r["missing"] == []
+    assert r["title"] == "Custom 1969 YG Mecaquartz Chronograph – Speedmaster inspired – $249.50"
+    d = r["description"]
+    assert "* 42mm gold case" in d and "* black tachymeter bezel insert" in d
+    assert "* extra rubber strap\n* lume hands\n\n$249.50" in d
+    assert d.rstrip().endswith("not an authentic Omega or Swatch product.")
+
+
+def test_listing_missing_fields_show_placeholders():
+    r = listing.render(CFG, {"model": "x"}, 100)
+    assert "dial_color" in r["missing"] and "<dial_color> dial" in r["description"]
+    assert listing.render(CFG, {}, 100)["title"].endswith("$100")
+
+
+def test_listing_prefill_and_merge():
+    parts = [{"category": "case", "color": "silver"}, {"category": "bezel_insert", "color": "black/slv"}]
+    pre = listing.prefill(CFG, {"nickname": "Moon 1", "family": "Moon"}, parts)
+    assert pre["model"] == "Moon 1" and pre["inspired"] == "Moon" and pre["case"] == "silver" and pre["bezel"] == "black/slv"
+    merged = listing.merge_fields(pre, {"case": "titanium", "bezel": "  "})
+    assert merged["case"] == "titanium" and merged["bezel"] == "black/slv"

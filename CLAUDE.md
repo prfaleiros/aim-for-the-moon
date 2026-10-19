@@ -38,16 +38,22 @@ the next step; nothing is built yet.
 - Own AWS stack (`MoonswitchStack`), own DynamoDB table, own API + API key, own S3 buckets.
 - Own Streamlit Community Cloud app (main file `app/app.py` — or as DESIGN.md says), own URL,
   viewer allowlist restricted to Paulo's email. Auto-redeploys on push to `main`.
-- **This repo is private** (the JDM one is public — that was a deliberate, settled choice
-  there only). No real sale figures, AliExpress links or buyer data in git: the original Excel
-  lives in the gitignored `data/` folder and is imported locally.
+- **Both repos are public on GitHub** (Paulo's call; can be flipped to private, Streamlit Cloud
+  deploys either). No real sale figures, AliExpress links or buyer data in git: the original Excel
+  and `data/import_overrides.csv` live in the gitignored `data/` folder; API URL/key only in
+  Streamlit secrets.
 - Fee model (confirmed): platform fee is charged on sale price **plus** buyer sales tax (and
   shipping charged), then deducted from the payout. Facebook checkout 10%, PayPal 2.99% (no
   flat fee), Zelle/Venmo/cash 0%. Not every sale goes through Facebook — each buyer pays
   differently, so the **payment channel is an explicit field**. Buyer tax default overridable.
 - Parts are individual records; unassigned delivered parts are stock (e.g. spare bezel
   inserts). Stems/spacers are deliberately not tracked. Own time/hours: optional only.
-- Listing text for Facebook is generated from a config template with placeholders (no FB API).
+- Listing text for Facebook is generated from a config template (`config/config.json` -> `listing`;
+  no FB API). Listing a build requires **target price AND list price** (independent: either may be
+  higher) plus all listing details (model, inspired-by, aesthetics, case, bracelet, dial, bezel).
+  Dimensions in the template are Paulo's own measurements, never vendor-title specs. No water-
+  resistance or battery lines (untested / redundant). Price stays in the text (negotiation starts
+  from it); regenerate after a change. Direct payment (Zelle/Venmo/cash) is preferred but not discounted.
 - No-shows aren't recorded; a refund = move the build back to `parts_ready` with a note (no refunds so far).
 
 ## About the source spreadsheet (`data/moonswitch_control.xlsx`)

@@ -30,6 +30,10 @@ def api(monkeypatch):
         yield call
 
 
+LISTING = {"aesthetics": "a silver dial", "case": "silver stainless steel", "bracelet": "silver stainless steel",
+           "dial_color": "white", "bezel": "black tachymeter"}
+
+
 def test_full_lifecycle(api):
     s, b = api("POST", "/builds", {"nickname": "Moonshine", "family": "Moon", "target_price": 250, "list_price": 250})
     bid = b["id"]
@@ -37,13 +41,13 @@ def test_full_lifecycle(api):
     assert s == 201
     api("POST", "/parts", {"category": "dial", "cost_usd": "12.5", "build_id": bid, "status": "delivered"})
     # cannot list or mark parts_ready while a part is outstanding
-    assert api("POST", f"/builds/{bid}/transition", {"status": "listed"})[0] == 400
+    assert api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING})[0] == 400
     api("POST", f"/builds/{bid}/transition", {"status": "awaiting_parts"})
     # delivering the last part flips awaiting_parts -> parts_ready automatically
     api("PATCH", f"/parts/{case['id']}", {"status": "delivered"})
     _, d = api("GET", f"/builds/{bid}")
     assert d["status"] == "parts_ready" and d["cost"] == 52.5
-    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed"})
+    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING})
     assert s == 200 and d["listed_date"] and d["estimated_net_payout"] > 0
     s, d = api("POST", f"/builds/{bid}/close", {"item_price": 250, "shipping_charged": 30, "channel": "fb_checkout", "label_cost": 44})
     assert s == 200 and d["status"] == "sold" and d["fee_usd"] == 30.24 and d["net_profit"] == 105.76 - 52.5 + 100
@@ -74,11 +78,55 @@ def test_price_log_and_validation(api):
 
 
 def test_calibration_ignores_sales_without_target(api):
-    for target, price in ((200, 180), (None, 100)):
-        _, b = api("POST", "/builds", {"nickname": "x", "family": "Moon", "target_price": target, "list_price": 150})
-        _, p = api("POST", "/parts", {"category": "case", "build_id": b["id"], "status": "delivered", "cost_usd": 10})
-        api("POST", f"/builds/{b['id']}/transition", {"status": "parts_ready"})
-        api("POST", f"/builds/{b['id']}/transition", {"status": "listed"})
-        api("POST", f"/builds/{b['id']}/close", {"item_price": price, "channel": "direct"})
+    _, b = api("POST", "/builds", {"nickname": "x", "family": "Moon", "target_price": 200, "list_price": 150})
+    api("POST", "/parts", {"category": "case", "build_id": b["id"], "status": "delivered", "cost_usd": 10})
+    api("POST", f"/builds/{b['id']}/transition", {"status": "parts_ready"})
+    api("POST", f"/builds/{b['id']}/transition", {"status": "listed", "listing": LISTING})
+    api("POST", f"/builds/{b['id']}/close", {"item_price": 180, "channel": "direct"})
+    # a history sale (imported from Sheet1) has no target; the API can no longer create one, so write it directly
+    import db, repo
+    db.put(repo.build_item({"id": "hist1", "nickname": "old", "family": "Moon", "type": "standard", "status": "sold",
+                            "item_price": 100, "net_profit": 40, "sale_date": "2026-09-01"}))
     fam = api("GET", "/reports/financials")[1]["by_family"][0]
     assert fam["sales"] == 2 and fam["avg_target"] == 200 and fam["avg_sold_vs_target"] == 180
+
+
+def _ready_build(api, **fields):
+    _, b = api("POST", "/builds", {"nickname": "Moon steel silver", "family": "Moon", **fields})
+    api("POST", "/parts", {"category": "case", "build_id": b["id"], "status": "delivered", "cost_usd": 40, "color": "silver"})
+    api("POST", f"/builds/{b['id']}/transition", {"status": "parts_ready"})
+    return b["id"]
+
+
+def test_listing_requires_target_and_price(api):
+    bid = _ready_build(api)
+    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING})
+    assert s == 400 and "target price and list price" in d["error"]
+    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "target_price": 175})
+    assert s == 400  # still no list price
+    # target and list price are independent: listing below target is fine
+    s, d = api("POST", f"/builds/{bid}/transition",
+               {"status": "listed", "listing": LISTING, "target_price": 175, "list_price": 150})
+    assert s == 200 and d["status"] == "listed" and d["target_price"] == 175 and d["list_price"] == 150
+    assert d["listing"]["bezel"] == "black tachymeter"
+
+
+def test_listing_blocked_by_missing_details(api):
+    bid = _ready_build(api, target_price=175, list_price=175)
+    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": {"aesthetics": "x"}})
+    assert s == 400 and "Dial color" in d["error"] and "Bezel" in d["error"]
+    assert api("GET", f"/builds/{bid}")[1]["status"] == "parts_ready"
+
+
+def test_listing_preview_and_get(api):
+    bid = _ready_build(api, target_price=175)
+    s, d = api("POST", f"/builds/{bid}/listing-preview", {"fields": LISTING, "list_price": 180})
+    assert s == 200 and d["missing"] == []
+    assert d["title"] == "Custom Moon steel silver Mecaquartz Chronograph – Moon inspired – $180"
+    assert d["fields"]["case"] == "silver stainless steel"  # edit wins over the part color prefill
+    assert {p["channel"] for p in d["payouts"]} == {"fb_checkout", "paypal", "direct"}
+    direct = next(p for p in d["payouts"] if p["channel"] == "direct")
+    assert direct["fee"] == 0 and direct["net_payout"] == 170 and direct["profit"] == 130  # 180 - 10 label - 40 parts
+    # preview wrote nothing; GET prefills the case color from the part
+    d = api("GET", f"/builds/{bid}/listing")[1]
+    assert d["fields"]["case"] == "silver" and "case" not in d["missing"] and "dial_color" in d["missing"]

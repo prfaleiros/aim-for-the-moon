@@ -9,5 +9,49 @@
     "fb_checkout": {"label": "Facebook checkout", "fee_rate": "0.10",   "fee_flat_usd": "0", "fee_on_tax": true},
     "paypal":      {"label": "PayPal",            "fee_rate": "0.0299", "fee_flat_usd": "0", "fee_on_tax": true},
     "direct":      {"label": "Zelle/Venmo/cash",  "fee_rate": "0",      "fee_flat_usd": "0", "fee_on_tax": false}
+  },
+
+  "listing": {
+    "_comment": "Facebook listing text. Placeholders: {model} {inspired} {aesthetics} {case} {bracelet} {dial_color} {bezel} {price}; the {extras} line expands to one bullet per extra line. Dimensions are measured, not taken from vendor titles. family_blurbs prefill {aesthetics} by build family (edit freely).",
+    "title": "Custom {model} Mecaquartz Chronograph – {inspired} inspired – ${price}",
+    "description_lines": [
+      "Custom-built chronograph with {aesthetics}, paired with a stainless steel case and bracelet.",
+      "",
+      "Powered by a PE50 mecaquartz movement, combining quartz accuracy with a crisp mechanical-style chronograph action and instant reset.",
+      "",
+      "Features:",
+      "",
+      "* 42mm {case} case",
+      "* 51mm lug-to-lug",
+      "* 15mm thickness",
+      "* 20mm lug width",
+      "* sapphire crystal",
+      "* {bracelet} bracelet, fully linked (fits wrists up to 8 1/4\")",
+      "* {dial_color} dial",
+      "* {bezel} bezel insert",
+      "* PE50 mecaquartz chronograph movement",
+      "* Fully functional chronograph",
+      "* Custom aftermarket build",
+      "* Watch only: no box or link-removal tool",
+      "{extras}",
+      "",
+      "${price}",
+      "Direct payment (Zelle/Venmo/cash) preferred; other payment methods can be arranged.",
+      "",
+      "Custom aftermarket build; not an authentic Omega or Swatch product."
+    ],
+    "family_blurbs": {
+      "Moon": "",
+      "Mercury": "",
+      "Uranus": "",
+      "Jupiter": "",
+      "Pluto": "",
+      "Cheddar": "",
+      "Moonphase": "",
+      "Moonshine": "",
+      "1969": "",
+      "1965": "",
+      "VK67": ""
+    }
   }
 }

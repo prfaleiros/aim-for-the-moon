@@ -36,16 +36,74 @@ if b.get("refund_note"):
     st.warning(f"Refunded: {b['refund_note']}")
 
 
+# ── listing (price, details and generated Facebook text) ─────────────────────────
+def listing_panel():
+    """Edit prices + listing details, see the generated text and per-channel payout. Used to list a build
+    (parts_ready) and to keep the text handy / regenerate it after listing."""
+    try:
+        base = api.get(f"/builds/{bid}/listing")
+    except api.ApiError as e:
+        st.error(str(e))
+        return
+    k = lambda name: f"lst_{bid}_{name}"  # noqa: E731
+    defaults = {"target": float(b.get("target_price") or 0), "price": float(b.get("list_price") or 0),
+                **{f: base["fields"].get(f, "") for f in base["labels"]}}
+    for name, val in defaults.items():
+        st.session_state.setdefault(k(name), val)
+
+    c = st.columns(2)
+    c[0].number_input("Target price $", min_value=0.0, step=5.0, format="%.2f", key=k("target"),
+                      help="Your baseline for this kind of build. Independent of the list price.")
+    c[1].number_input("List price $", min_value=0.0, step=5.0, format="%.2f", key=k("price"),
+                      help="The asking price on the listing; the sale price is whatever you negotiate.")
+    st.markdown("**Listing details**")
+    fields = {}
+    names = [f for f in base["labels"] if f != "extras"]
+    for row in (names[:3], names[3:]):
+        cols = st.columns(len(row))
+        for col, f in zip(cols, row):
+            fields[f] = col.text_input(base["labels"][f], key=k(f))
+    fields["extras"] = st.text_area(base["labels"]["extras"], key=k("extras"), height=80,
+                                    help="Optional bullets added to the feature list, e.g. an extra strap.")
+
+    price = st.session_state[k("price")]
+    try:
+        view = api.post(f"/builds/{bid}/listing-preview", {"fields": fields, "list_price": price})
+    except api.ApiError as e:
+        st.error(str(e))
+        return
+    if view["missing"]:
+        st.warning("Still needed: " + ", ".join(base["labels"][m] for m in view["missing"]))
+
+    st.markdown("**Title**")
+    st.code(view["title"], language=None)
+    st.caption(f"{len(view['title'])} characters")
+    st.markdown("**Description**")
+    st.code(view["description"], language=None)
+
+    st.markdown("**Estimated payout at this list price**")
+    st.caption("After the channel fee (default buyer tax) and an assumed shipping label; profit also subtracts parts cost.")
+    st.dataframe(pd.DataFrame(view["payouts"])[["label", "fee", "net_payout", "profit"]], hide_index=True,
+                 use_container_width=True, column_config={
+                     "label": "Channel", "fee": st.column_config.NumberColumn("Fee $", format="%.2f"),
+                     "net_payout": st.column_config.NumberColumn("Net payout $", format="%.2f"),
+                     "profit": st.column_config.NumberColumn("Profit $", format="%.2f")})
+
+    target = st.session_state[k("target")]
+    body = {"target_price": target or "", "list_price": price or "", "listing": fields}
+    if status == "parts_ready":
+        blocked = not target or not price or bool(view["missing"])
+        if st.button("Mark as listed", type="primary", disabled=blocked, key=k("go"),
+                     help="Needs a target price, a list price and all listing details."):
+            if api.run(api.post, f"/builds/{bid}/transition", {"status": "listed", **body}, success="Listed"):
+                st.rerun()
+    elif st.button("Save listing details", key=k("save")):
+        if api.run(api.patch, f"/builds/{bid}", body, success="Saved"):
+            st.rerun()
+
+
 # ── lifecycle ───────────────────────────────────────────────────────────────────
 st.markdown("#### Status")
-if status == "parts_ready":
-    c1, c2 = st.columns([1, 2])
-    price = c1.number_input("List price $", min_value=0.0, step=5.0, format="%.2f",
-                            value=float(b.get("list_price") or b.get("target_price") or 0), key=f"lp_{bid}")
-    if c2.button("List it", type="primary", key="do_list"):
-        if (not price or api.run(api.patch, f"/builds/{bid}", {"list_price": price})) and \
-                api.run(api.post, f"/builds/{bid}/transition", {"status": "listed"}, success="Listed"):
-            st.rerun()
 if status == "listed":
     st.caption("Listed. Record the sale below, or take it back to parts ready.")
 for nxt in NEXT[status]:
@@ -54,6 +112,10 @@ for nxt in NEXT[status]:
     if st.button(f"→ {STATUS_LABEL[nxt]}", key=f"to_{nxt}"):
         if api.run(api.post, f"/builds/{bid}/transition", {"status": nxt}):
             st.rerun()
+
+if status in ("parts_ready", "listed"):
+    with st.expander("List it" if status == "parts_ready" else "Listing text", expanded=status == "parts_ready"):
+        listing_panel()
 
 if status == "listed":
     with st.form("close_sale"):
