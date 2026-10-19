@@ -258,3 +258,22 @@ with st.expander("Assign from stock"):
         if sel.selection.rows and st.button(f"Assign {len(sel.selection.rows)} selected"):
             if all(api.run(api.patch, f"/parts/{stock[i]['id']}", {"build_id": bid}) for i in sel.selection.rows):
                 st.rerun()
+
+# ── danger zone ─────────────────────────────────────────────────────────────────
+st.divider()
+with st.expander("Danger zone"):
+    if status == "sold":
+        st.caption("A sold build is part of your financials and can't be deleted. Refund it to parts ready first "
+                   "(Refund section above), then delete it here if it is really a mistake.")
+    else:
+        st.markdown(f"**Delete this build.** This can't be undone. It has {len(b['parts'])} part(s).")
+        parts_mode = st.radio("Its parts", ["stock", "delete"], horizontal=True, key=f"del_mode_{bid}",
+                              format_func={"stock": "Return to stock", "delete": "Delete them too"}.get,
+                              help="Only delivered parts show on the Stock page.")
+        confirm = st.text_input(f"Type the build name ({b['nickname']}) to confirm", key=f"del_confirm_{bid}")
+        if st.button("Delete build", type="primary", disabled=confirm.strip() != b["nickname"].strip(),
+                     key=f"del_go_{bid}"):
+            if api.run(api.delete, f"/builds/{bid}", {"confirm": confirm, "parts": parts_mode}, success="Build deleted"):
+                st.session_state.pop("build_id", None)
+                st.switch_page("pages/1_Builds.py")
+

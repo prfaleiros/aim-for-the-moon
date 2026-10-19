@@ -130,3 +130,31 @@ def test_listing_preview_and_get(api):
     # preview wrote nothing; GET prefills the case color from the part
     d = api("GET", f"/builds/{bid}/listing")[1]
     assert d["fields"]["case"] == "silver" and "case" not in d["missing"] and "dial_color" in d["missing"]
+
+
+def test_delete_build_keeps_or_removes_parts(api):
+    _, b = api("POST", "/builds", {"nickname": "Dup", "list_price": 100})
+    api("PATCH", f"/builds/{b['id']}", {"list_price": 90})  # leaves a price-log item behind
+    _, keep = api("POST", "/parts", {"category": "case", "build_id": b["id"], "status": "delivered"})
+    _, gone = api("POST", "/parts", {"category": "dial", "build_id": b["id"], "status": "delivered"})
+    assert api("DELETE", f"/builds/{b['id']}", {"confirm": "wrong"})[0] == 400  # confirmation must match the name
+    assert api("DELETE", f"/builds/{b['id']}", {"confirm": "Dup", "parts": "bogus"})[0] == 400
+    s, d = api("DELETE", f"/builds/{b['id']}", {"confirm": "Dup", "parts": "stock"})
+    assert s == 200 and d["parts"] == 2
+    assert api("GET", f"/builds/{b['id']}")[0] == 404 and api("GET", "/builds")[1] == []
+    assert {p["id"] for p in api("GET", "/stock")[1]} == {keep["id"], gone["id"]}
+    # and with parts deleted too
+    _, b2 = api("POST", "/builds", {"nickname": "Dup2"})
+    api("POST", "/parts", {"category": "case", "build_id": b2["id"], "status": "delivered"})
+    assert api("DELETE", f"/builds/{b2['id']}", {"confirm": "Dup2", "parts": "delete"})[0] == 200
+    assert len(api("GET", "/stock")[1]) == 2
+
+
+def test_cannot_delete_sold_build(api):
+    bid = _ready_build(api, target_price=100, list_price=100)
+    api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING})
+    api("POST", f"/builds/{bid}/close", {"item_price": 100, "channel": "direct"})
+    s, d = api("DELETE", f"/builds/{bid}", {"confirm": "Moon steel silver"})
+    assert s == 400 and "financials" in d["error"]
+    api("POST", f"/builds/{bid}/transition", {"status": "parts_ready", "note": "mistake"})  # refund first
+    assert api("DELETE", f"/builds/{bid}", {"confirm": "Moon steel silver"})[0] == 200

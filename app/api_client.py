@@ -33,8 +33,8 @@ def patch(path, body):
     return _call("PATCH", path, body)
 
 
-def delete(path):
-    return _call("DELETE", path)
+def delete(path, body=None):
+    return _call("DELETE", path, body)
 
 
 @st.cache_data(ttl=300)

@@ -135,6 +135,29 @@ def transition_build(body, _q, bid):
     return 200, repo.strip(b)
 
 
+def delete_build(body, _q, bid):
+    """Danger zone. Needs the build's nickname as confirmation (also enforced server-side); sold builds are
+    part of the financials, so they must be refunded to parts_ready first."""
+    b = _get_build(bid)
+    if b["status"] == "sold":
+        raise HttpError(400, "a sold build is part of your financials; refund it to parts ready first")
+    if (body.get("confirm") or "").strip() != b["nickname"].strip():
+        raise HttpError(400, "confirmation does not match the build name")
+    mode = body.get("parts", "stock")
+    if mode not in ("stock", "delete"):
+        raise HttpError(400, "parts must be 'stock' or 'delete'")
+    parts = repo.parts_of(db, bid)
+    for p in parts:
+        if mode == "delete":
+            db.delete(f"PART#{p['id']}")
+        else:
+            p.pop("build_id", None)
+            db.put(repo.part_item(p))
+    for item in db.query_pk(f"BUILD#{bid}"):  # META + price log
+        db.delete(item["PK"], item["SK"])
+    return 200, {"deleted": bid, "parts": len(parts), "parts_mode": mode}
+
+
 def close_sale(body, _q, bid):
     b = _get_build(bid)
     if b["status"] != "listed":
@@ -294,6 +317,7 @@ ROUTES = [
     ("POST", r"/builds", create_build),
     ("GET", r"/builds/(?P<bid>[^/]+)", get_build),
     ("PATCH", r"/builds/(?P<bid>[^/]+)", update_build),
+    ("DELETE", r"/builds/(?P<bid>[^/]+)", delete_build),
     ("POST", r"/builds/(?P<bid>[^/]+)/transition", transition_build),
     ("POST", r"/builds/(?P<bid>[^/]+)/close", close_sale),
     ("GET", r"/builds/(?P<bid>[^/]+)/listing", get_listing),
