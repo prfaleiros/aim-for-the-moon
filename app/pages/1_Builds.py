@@ -39,7 +39,7 @@ if df.empty:
     st.info("No builds match this filter.")
 else:
     money = {c: st.column_config.NumberColumn(c, format="%.2f") for c in ("Cost $", "Target $", "List $", "Sold $", "Net $")}
-    sel = st.dataframe(df, hide_index=True, use_container_width=True, on_select="rerun",
+    sel = st.dataframe(df, hide_index=True, width="stretch", on_select="rerun",
                        selection_mode="single-row", column_config=money, key="builds_table")
     st.caption("Click a row to open the build.")
     if sel.selection.rows:

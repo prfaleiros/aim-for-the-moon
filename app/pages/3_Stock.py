@@ -15,7 +15,7 @@ except api.ApiError as e:
 
 if stock:
     df = pd.DataFrame(stock).reindex(columns=["category", "description", "color", "cost_usd", "link"])
-    st.dataframe(df.fillna(""), hide_index=True, use_container_width=True,
+    st.dataframe(df.fillna(""), hide_index=True, width="stretch",
                  column_config={"cost_usd": st.column_config.NumberColumn("Cost $", format="%.2f")})
     st.metric("Stock value", esc(f"${df['cost_usd'].fillna(0).sum():,.2f}"))
 else:

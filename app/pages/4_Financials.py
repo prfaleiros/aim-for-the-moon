@@ -22,7 +22,7 @@ st.caption("Revenue = item + shipping charged. Payout = what lands after fees an
            "'history' = old Sheet1 sales with no date.")
 if fin["monthly"]:
     mdf = pd.DataFrame(fin["monthly"])
-    st.dataframe(mdf, hide_index=True, use_container_width=True, column_config={
+    st.dataframe(mdf, hide_index=True, width="stretch", column_config={
         "month": "Month", "sales": st.column_config.NumberColumn("Sales", format="%d"),
         "revenue": money("Revenue $"), "fees": money("Fees $"), "labels": money("Labels $"),
         "payout": money("Payout $"), "net_profit": money("Net profit $")})
@@ -39,7 +39,7 @@ if fin["by_family"]:
     fdf = pd.DataFrame(fin["by_family"])
     fdf["gap"] = fdf["avg_sold_vs_target"] - fdf["avg_target"]
     st.dataframe(fdf[["family", "sales", "avg_target", "avg_sold_vs_target", "gap", "avg_vs_estimate", "avg_net_profit"]],
-                 hide_index=True, use_container_width=True, column_config={
+                 hide_index=True, width="stretch", column_config={
                      "family": "Family", "sales": st.column_config.NumberColumn("Sales", format="%d"),
                      "avg_target": money("Avg target $"), "avg_sold_vs_target": money("Avg item price $"),
                      "gap": money("Price gap $"), "avg_vs_estimate": money("Payout vs est. $"),

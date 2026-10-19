@@ -89,7 +89,7 @@ def listing_panel():
     st.markdown("**Estimated payout at this list price**")
     st.caption("After the channel fee (default buyer tax) and an assumed shipping label; profit also subtracts parts cost.")
     st.dataframe(pd.DataFrame(view["payouts"])[["label", "fee", "net_payout", "profit"]], hide_index=True,
-                 use_container_width=True, column_config={
+                 width="stretch", column_config={
                      "label": "Channel", "fee": st.column_config.NumberColumn("Fee $", format="%.2f"),
                      "net_payout": st.column_config.NumberColumn("Net payout $", format="%.2f"),
                      "profit": st.column_config.NumberColumn("Profit $", format="%.2f")})
@@ -201,7 +201,7 @@ with st.expander("Details"):
     if b.get("price_log"):
         st.markdown("**List price changes**")
         st.dataframe(pd.DataFrame(b["price_log"]).rename(columns={"at": "When", "from": "From $", "to": "To $"}),
-                     hide_index=True, use_container_width=True)
+                     hide_index=True, width="stretch")
 
 # ── parts ───────────────────────────────────────────────────────────────────────
 st.markdown("#### Parts")
@@ -216,7 +216,7 @@ if parts:
     view = orig[["category", "description", "cost_usd", "status", "included_with_case", "color", "link"]].copy()
     view["action"] = "keep"
     edited = st.data_editor(
-        view, hide_index=True, use_container_width=True, key=f"parts_{bid}",
+        view, hide_index=True, width="stretch", key=f"parts_{bid}",
         column_config={
             "category": st.column_config.SelectboxColumn("Category", options=CATEGORIES, required=True),
             "description": st.column_config.TextColumn("Description", width="large"), "color": "Color", "link": "Link",
@@ -277,7 +277,7 @@ with st.expander("Assign from stock"):
         st.caption("No delivered, unassigned parts in stock.")
     else:
         sdf = pd.DataFrame(stock).reindex(columns=["category", "description", "color", "cost_usd"]).fillna("")
-        sel = st.dataframe(sdf, hide_index=True, use_container_width=True, on_select="rerun",
+        sel = st.dataframe(sdf, hide_index=True, width="stretch", on_select="rerun",
                            selection_mode="multi-row", key=f"stock_pick_{bid}",
                            column_config={"cost_usd": st.column_config.NumberColumn("Cost $", format="%.2f")})
         if sel.selection.rows and st.button(f"Assign {len(sel.selection.rows)} selected"):
