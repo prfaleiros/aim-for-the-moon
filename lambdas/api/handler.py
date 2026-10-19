@@ -79,6 +79,26 @@ def get_build(_body, _q, bid):
     return 200, b
 
 
+def _event_dates(b: dict, body: dict) -> dict:
+    """Backdate/correct listed_date and sale_date after the fact. Only where the event happened."""
+    out = {}
+    try:
+        if "listed_date" in body:
+            if b["status"] not in ("listed", "sold"):
+                raise ValueError("listing date only applies to a listed or sold build")
+            out["listed_date"] = lifecycle.parse_day(body["listed_date"])
+        if "sale_date" in body:
+            if b["status"] != "sold":
+                raise ValueError("sale date only applies to a sold build")
+            out["sale_date"] = lifecycle.parse_day(body["sale_date"])
+            if not out["sale_date"]:
+                raise ValueError("a sold build needs a sale date")
+        lifecycle.check_order(out.get("listed_date", b.get("listed_date")), out.get("sale_date", b.get("sale_date")))
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    return out
+
+
 def update_build(body, _q, bid):
     b = _get_build(bid)
     upd = _pick(body, BUILD_FIELDS)
@@ -88,6 +108,7 @@ def update_build(body, _q, bid):
     if "list_price" in upd and upd["list_price"] != b.get("list_price"):
         db.put({"PK": f"BUILD#{bid}", "SK": f"PRICE#{lifecycle.now_iso()}",
                 "from": b.get("list_price"), "to": upd["list_price"]})
+    upd.update(_event_dates(b, body))
     b.update(upd)
     if "listing" in body:
         b["listing"] = listing.clean_fields(body["listing"])
@@ -101,7 +122,7 @@ def transition_build(body, _q, bid):
     if new == "sold":
         raise HttpError(400, "use /close to record a sale")
     try:
-        upd = lifecycle.transition(b, new, body.get("note"))
+        upd = lifecycle.transition(b, new, body.get("note"), on=body.get("date"))
     except ValueError as e:
         raise HttpError(400, str(e))
     old = b["status"]
@@ -170,6 +191,10 @@ def close_sale(body, _q, bid):
             "channel": channel}
     if not safe_decimal(sale.get("item_price")):
         raise HttpError(400, "item_price required")
+    try:
+        sold = lifecycle.transition(b, "sold", on=body.get("sale_date"))
+    except ValueError as e:
+        raise HttpError(400, str(e))
     res = fees.sale_breakdown(cfg, sale, costs.build_cost(repo.parts_of(db, bid)))
     est = b.get("estimated_net_payout")
     if est is not None:
@@ -178,7 +203,7 @@ def close_sale(body, _q, bid):
     b.update({"item_price": _num(sale["item_price"]),
               "shipping_charged": _num(sale.get("shipping_charged")) or 0,
               "label_cost": _num(sale.get("label_cost")) or 0,
-              **res, **lifecycle.transition(b, "sold")})
+              **res, **sold})
     db.put(repo.build_item(repo.strip(b)))
     return 200, repo.strip(b)
 

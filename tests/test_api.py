@@ -158,3 +158,51 @@ def test_cannot_delete_sold_build(api):
     assert s == 400 and "financials" in d["error"]
     api("POST", f"/builds/{bid}/transition", {"status": "parts_ready", "note": "mistake"})  # refund first
     assert api("DELETE", f"/builds/{bid}", {"confirm": "Moon steel silver"})[0] == 200
+
+
+def _days_ago(n):
+    from datetime import date, timedelta
+    return (date.today() - timedelta(days=n)).isoformat()
+
+
+def test_backdated_listing_and_sale(api):
+    bid = _ready_build(api, target_price=100, list_price=100)
+    assert api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "date": "2999-01-01"})[0] == 400
+    assert api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "date": "junk"})[0] == 400
+    s, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "date": _days_ago(10)})
+    assert s == 200 and d["listed_date"] == _days_ago(10)
+    # a sale cannot predate the listing, or be in the future
+    assert api("POST", f"/builds/{bid}/close", {"item_price": 100, "sale_date": _days_ago(11)})[0] == 400
+    assert api("POST", f"/builds/{bid}/close", {"item_price": 100, "sale_date": "2999-01-01"})[0] == 400
+    assert api("GET", f"/builds/{bid}")[1]["status"] == "listed"  # failed attempts changed nothing
+    s, d = api("POST", f"/builds/{bid}/close", {"item_price": 100, "channel": "direct", "sale_date": _days_ago(3)})
+    assert s == 200 and d["sale_date"] == _days_ago(3)
+    assert api("GET", "/reports/financials")[1]["avg_days_listed_to_sold"] == 7
+
+
+def test_sale_date_defaults_to_today(api):
+    bid = _ready_build(api, target_price=100, list_price=100)
+    api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING})
+    _, d = api("POST", f"/builds/{bid}/close", {"item_price": 100, "channel": "direct"})
+    assert d["sale_date"] == d["listed_date"]  # both default to today (UTC)
+
+
+def test_edit_event_dates_afterwards(api):
+    bid = _ready_build(api, target_price=100, list_price=100)
+    assert api("PATCH", f"/builds/{bid}", {"listed_date": _days_ago(5)})[0] == 400  # not listed yet
+    api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "date": _days_ago(8)})
+    assert api("PATCH", f"/builds/{bid}", {"sale_date": _days_ago(1)})[0] == 400  # not sold yet
+    api("POST", f"/builds/{bid}/close", {"item_price": 100, "channel": "direct", "sale_date": _days_ago(4)})
+    s, d = api("PATCH", f"/builds/{bid}", {"sale_date": _days_ago(2), "listed_date": _days_ago(9)})
+    assert s == 200 and d["sale_date"] == _days_ago(2) and d["listed_date"] == _days_ago(9)
+    assert api("PATCH", f"/builds/{bid}", {"listed_date": _days_ago(1)})[0] == 400  # would be after the sale
+    assert api("PATCH", f"/builds/{bid}", {"sale_date": ""})[0] == 400  # a sold build keeps a sale date
+    assert api("GET", f"/builds/{bid}")[1]["sale_date"] == _days_ago(2)
+
+
+def test_relist_keeps_first_listing_date(api):
+    bid = _ready_build(api, target_price=100, list_price=100)
+    api("POST", f"/builds/{bid}/transition", {"status": "listed", "listing": LISTING, "date": _days_ago(20)})
+    api("POST", f"/builds/{bid}/transition", {"status": "parts_ready"})
+    _, d = api("POST", f"/builds/{bid}/transition", {"status": "listed", "date": _days_ago(2)})
+    assert d["listed_date"] == _days_ago(20)

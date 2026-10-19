@@ -1,3 +1,5 @@
+from datetime import date, timedelta
+
 import pandas as pd
 import streamlit as st
 
@@ -5,6 +7,9 @@ import api_client as api
 from common import CATEGORIES, NEXT, PART_STATUSES, STATUS_LABEL, esc, page, usd
 
 page("Build")
+
+TODAY = date.today()
+LATEST = TODAY + timedelta(days=1)  # server clock is UTC; the API allows one day of slack
 
 bid = st.session_state.get("build_id")
 if not bid:
@@ -92,6 +97,9 @@ def listing_panel():
     target = st.session_state[k("target")]
     body = {"target_price": target or "", "list_price": price or "", "listing": fields}
     if status == "parts_ready":
+        if not b.get("listed_date"):  # a relist keeps the original listing date
+            body["date"] = st.date_input("Listed on", value=TODAY, max_value=LATEST, key=k("date"),
+                                         help="Defaults to today; pick an earlier day if it went up before you recorded it.").isoformat()
         blocked = not target or not price or bool(view["missing"])
         if st.button("Mark as listed", type="primary", disabled=blocked, key=k("go"),
                      help="Needs a target price, a list price and all listing details."):
@@ -127,11 +135,15 @@ if status == "listed":
         channels = cfg["channels"]
         channel = st.radio("Payment channel", list(channels), format_func=lambda k: channels[k]["label"],
                            index=list(channels).index(cfg["default_channel"]), horizontal=True)
-        o = st.columns(2)
+        o = st.columns(3)
+        listed_on = date.fromisoformat(b["listed_date"]) if b.get("listed_date") else None
+        sold_on = o[2].date_input("Sold on", value=max(TODAY, listed_on) if listed_on else TODAY, min_value=listed_on,
+                                  max_value=LATEST, help="Defaults to today; pick the real day if you are recording it late.")
         tax = o[0].number_input("Buyer sales tax $ (blank = default rate)", min_value=0.0, step=1.0, format="%.2f", value=None)
         fee = o[1].number_input("Platform fee $ (blank = calculated)", min_value=0.0, step=1.0, format="%.2f", value=None)
         if st.form_submit_button("Mark sold", type="primary"):
-            body = {"item_price": item, "shipping_charged": ship, "label_cost": label, "channel": channel}
+            body = {"item_price": item, "shipping_charged": ship, "label_cost": label, "channel": channel,
+                    "sale_date": sold_on.isoformat()}
             if tax is not None:
                 body["sales_tax"] = tax
             if fee is not None:
@@ -167,11 +179,24 @@ with st.expander("Details"):
         target = c[0].number_input("Target price $", min_value=0.0, step=5.0, format="%.2f", value=float(b.get("target_price") or 0))
         listp = c[1].number_input("List price $", min_value=0.0, step=5.0, format="%.2f", value=float(b.get("list_price") or 0))
         hours = c[2].number_input("Hours (optional)", min_value=0.0, step=0.5, value=float(b.get("hours") or 0))
+        d = st.columns(3)
+        new_listed = new_sold = None
+        if status in ("listed", "sold"):
+            new_listed = d[0].date_input("Listed on", value=date.fromisoformat(b["listed_date"]) if b.get("listed_date") else None,
+                                         max_value=LATEST, key=f"d_listed_{bid}")
+        if status == "sold":
+            new_sold = d[1].date_input("Sold on", value=date.fromisoformat(b["sale_date"]) if b.get("sale_date") else TODAY,
+                                       max_value=LATEST, key=f"d_sold_{bid}")
         notes = st.text_area("Notes", b.get("notes") or "")
         if st.form_submit_button("Save"):
-            if api.run(api.patch, f"/builds/{bid}", {"nickname": nickname, "family": family, "type": typ,
-                                                     "target_price": target or "", "list_price": listp or "",
-                                                     "hours": hours or "", "notes": notes}, success="Saved"):
+            body = {"nickname": nickname, "family": family, "type": typ, "target_price": target or "",
+                    "list_price": listp or "", "hours": hours or "", "notes": notes}
+            # dates are only sent when changed, so saving other fields never re-stamps history
+            if new_listed and new_listed.isoformat() != b.get("listed_date"):
+                body["listed_date"] = new_listed.isoformat()
+            if new_sold and new_sold.isoformat() != b.get("sale_date"):
+                body["sale_date"] = new_sold.isoformat()
+            if api.run(api.patch, f"/builds/{bid}", body, success="Saved"):
                 st.rerun()
     if b.get("price_log"):
         st.markdown("**List price changes**")
