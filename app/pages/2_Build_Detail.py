@@ -267,16 +267,16 @@ with st.expander("Add a new part"):
                                             "status": pstat, "build_id": bid}, success="Part added"):
                 st.rerun()
 
-with st.expander("Assign from stock"):
+with st.expander("Assign from stock / on order"):
     try:
-        stock = api.get("/stock")
+        stock = api.get("/stock?include_ordered=1")
     except api.ApiError as e:
         stock = []
         st.error(str(e))
     if not stock:
-        st.caption("No delivered, unassigned parts in stock.")
+        st.caption("No unassigned parts in stock or on order.")
     else:
-        sdf = pd.DataFrame(stock).reindex(columns=["category", "description", "color", "cost_usd"]).fillna("")
+        sdf = pd.DataFrame(stock).reindex(columns=["status", "category", "description", "color", "cost_usd"]).fillna("")
         sel = st.dataframe(sdf, hide_index=True, width="stretch", on_select="rerun",
                            selection_mode="multi-row", key=f"stock_pick_{bid}",
                            column_config={"cost_usd": st.column_config.NumberColumn("Cost $", format="%.2f")})

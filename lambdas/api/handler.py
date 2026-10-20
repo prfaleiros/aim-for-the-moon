@@ -7,12 +7,14 @@ from datetime import date
 import db
 import repo
 from config import load_config
-from core import costs, fees, lifecycle, listing
+from core import costs, fees, lifecycle, listing, orders
 from core.money import safe_decimal, q
 
 BUILD_FIELDS = {"nickname", "family", "type", "target_price", "list_price", "notes", "thumbnail_key", "hours", "listing_url"}
-PART_FIELDS = {"category", "description", "link", "color", "cost_usd", "included_with_case",
-               "status", "order_id", "build_id"}
+PART_FIELDS = {"category", "description", "link", "color", "variant", "cost_usd", "included_with_case",
+               "status", "order_id", "build_id", "vendor"}
+LINE_FIELDS = {"description", "variant", "category", "unit_price", "qty", "link", "color", "build_id"}
+ORDER_AMOUNTS = ("discount", "shipping", "tax", "total_paid")
 SALE_FIELDS = ("item_price", "shipping_charged", "sales_tax", "channel", "fee_usd", "label_cost",
                "payout", "net_profit", "roi", "payout_vs_estimate")
 CATEGORIES = {"case", "bezel_insert", "bracelet", "movement", "hands", "dial", "other"}
@@ -260,8 +262,198 @@ def delete_part(_body, _q, pid):
     return 200, {"deleted": pid}
 
 
-def stock(_body, _q):
-    return 200, [repo.strip(i) for i in db.query_gsi1("STOCK") if i.get("status") == "delivered"]
+def stock(_body, q):
+    """Unassigned parts. Delivered ones are stock; include_ordered=1 adds what is still on order."""
+    wanted = {"delivered", "ordered"} if q.get("include_ordered") == "1" else {"delivered"}
+    return 200, [repo.strip(i) for i in db.query_gsi1("STOCK") if i.get("status") in wanted]
+
+
+# ── orders ──────────────────────────────────────────────────────────────────────
+
+def _order_parts(oid: str) -> list:
+    return [repo.strip(p) for p in db.scan_order_parts() if p["order_id"] == oid]
+
+
+def _order_header(body: dict, existing: dict | None = None) -> dict:
+    """Validated header fields; `existing` supplies defaults when editing."""
+    cur = existing or {}
+    vendor = (body.get("vendor", cur.get("vendor")) or "").strip()
+    if not vendor:
+        raise HttpError(400, "vendor (store) is required")
+    try:
+        order_date = lifecycle.parse_day(body.get("order_date", cur.get("order_date")))
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    if not order_date:
+        raise HttpError(400, "order date is required")
+    out = {"vendor": vendor, "order_date": order_date,
+           "order_ref": (body.get("order_ref", cur.get("order_ref")) or "").strip() or None,
+           "notes": (body.get("notes", cur.get("notes")) or "").strip() or None}
+    for f in ORDER_AMOUNTS:
+        out[f] = _num(body.get(f, cur.get(f))) or 0
+    return out
+
+
+def _clean_lines(lines) -> list:
+    if not lines:
+        raise HttpError(400, "add at least one line")
+    out = []
+    for n, line in enumerate(lines, 1):
+        line = _pick(line, LINE_FIELDS)
+        if line.get("category") not in CATEGORIES:
+            raise HttpError(400, f"line {n}: category must be one of {sorted(CATEGORIES)}")
+        if line.get("build_id"):
+            _get_build(line["build_id"])
+        else:
+            line.pop("build_id", None)
+        out.append(line)
+    return out
+
+
+def _allocate(lines, header):
+    try:
+        return orders.build(lines, header["discount"], header["shipping"], header["tax"], header["total_paid"])
+    except ValueError as e:
+        raise HttpError(400, str(e))
+
+
+def _duplicate(header: dict, ignore: str | None = None):
+    if header["order_ref"]:
+        for o in db.query_gsi1("ORDERS"):
+            same_store = o["vendor"].lower() == header["vendor"].lower()
+            if o["id"] != ignore and same_store and o.get("order_ref") == header["order_ref"]:
+                return o
+    return None
+
+
+def preview_order(body, _q):
+    """Check the receipt math and show each part's allocated cost. Writes nothing."""
+    header = _order_header(body)
+    res = _allocate(_clean_lines(body.get("lines")), header)
+    dup = _duplicate(header)
+    res["duplicate"] = dup["id"] if dup else None
+    return 200, res
+
+
+def create_order(body, _q):
+    header = _order_header(body)
+    res = _allocate(_clean_lines(body.get("lines")), header)
+    if res["error"]:
+        raise HttpError(400, res["error"])
+    if _duplicate(header):
+        raise HttpError(409, f"order {header['order_ref']} from {header['vendor']} is already entered")
+    oid = repo.new_id()
+    order = {"id": oid, **header, "created_at": lifecycle.now_iso()}
+    db.put(repo.order_item(order))
+    made, touched = [], set()
+    for u in res["parts"]:
+        part = {"id": repo.new_id(), "order_id": oid, "vendor": header["vendor"], "status": "ordered",
+                "included_with_case": False, **_pick(u, PART_FIELDS | {"item_price"})}
+        db.put(repo.part_item(part))
+        made.append(part)
+        if part.get("build_id"):
+            touched.add(part["build_id"])
+    for bid in touched:
+        repo.refresh_auto_status(db, bid)
+    return 201, {**order, "parts": made}
+
+
+def _order_view(o: dict, parts: list) -> dict:
+    o = repo.strip(o)
+    delivered = sum(1 for p in parts if p.get("status") == "delivered")
+    o.update(parts_total=len(parts), parts_delivered=delivered,
+             status="delivered" if parts and delivered == len(parts) else "on_order")
+    return o
+
+
+def list_orders(_body, _q):
+    by_order = defaultdict(list)
+    for p in db.scan_order_parts():
+        by_order[p["order_id"]].append(p)
+    rows = [_order_view(o, by_order[o["id"]]) for o in db.query_gsi1("ORDERS")]
+    return 200, sorted(rows, key=lambda r: (r["order_date"], r["id"]), reverse=True)
+
+
+def _get_order(oid):
+    o = db.get(f"ORDER#{oid}")
+    if not o:
+        raise HttpError(404, "order not found")
+    return o
+
+
+def get_order(_body, _q, oid):
+    o = _get_order(oid)
+    parts = _order_parts(oid)
+    return 200, {**_order_view(o, parts), "parts": parts}
+
+
+def deliver_order(body, _q, oid):
+    """The package arrived: every part still on order becomes delivered (backdate with `date`)."""
+    o = _get_order(oid)
+    try:
+        day = lifecycle.parse_day(body.get("date")) or lifecycle.now_iso()[:10]
+    except ValueError as e:
+        raise HttpError(400, str(e))
+    if day < o["order_date"]:
+        raise HttpError(400, f"delivery {day} is before the order date {o['order_date']}")
+    touched = set()
+    for p in db.scan_order_parts():
+        if p["order_id"] == oid and p.get("status") != "delivered":
+            p["status"] = "delivered"
+            db.put(repo.part_item(repo.strip(p)))
+            if p.get("build_id"):
+                touched.add(p["build_id"])
+    for bid in touched:
+        repo.refresh_auto_status(db, bid)
+    o["delivered_date"] = day
+    db.put(repo.order_item(repo.strip(o)))
+    parts = _order_parts(oid)
+    return 200, {**_order_view(o, parts), "parts": parts}
+
+
+def update_order(body, _q, oid):
+    """Fix the header or the amounts; costs are re-allocated over the parts the order has now."""
+    o = _get_order(oid)
+    header = _order_header(body, o)
+    if _duplicate(header, ignore=oid):
+        raise HttpError(409, f"order {header['order_ref']} from {header['vendor']} is already entered")
+    parts = [p for p in db.scan_order_parts() if p["order_id"] == oid]
+    lines = [{"description": p.get("description") or p["category"], "unit_price": p.get("item_price", 0)}
+             for p in parts]
+    res = _allocate(lines, header) if parts else {"parts": [], "error": None}
+    if res["error"]:
+        raise HttpError(400, res["error"])
+    for p, alloc in zip(parts, res["parts"]):
+        p["cost_usd"], p["vendor"] = alloc["cost_usd"], header["vendor"]
+        db.put(repo.part_item(repo.strip(p)))
+    o.update(header)
+    db.put(repo.order_item(repo.strip(o)))
+    done = _order_parts(oid)
+    return 200, {**_order_view(o, done), "parts": done}
+
+
+def delete_order(body, _q, oid):
+    """Danger zone: type the order ref (or the store name if it has none). Parts are deleted or kept as plain parts."""
+    o = _get_order(oid)
+    if (body.get("confirm") or "").strip() != (o.get("order_ref") or o["vendor"]):
+        raise HttpError(400, "confirmation does not match the order reference")
+    mode = body.get("parts", "delete")
+    if mode not in ("delete", "keep"):
+        raise HttpError(400, "parts must be 'delete' or 'keep'")
+    parts = [p for p in db.scan_order_parts() if p["order_id"] == oid]
+    touched = set()
+    for p in parts:
+        if p.get("build_id"):
+            touched.add(p["build_id"])
+        if mode == "delete":
+            db.delete(f"PART#{p['id']}")
+        else:
+            p.pop("order_id", None)
+            db.put(repo.part_item(repo.strip(p)))
+    db.delete(f"ORDER#{oid}")
+    for bid in touched:
+        repo.refresh_auto_status(db, bid)
+    return 200, {"deleted": oid, "parts": len(parts), "parts_mode": mode}
 
 
 # ── reports / config ────────────────────────────────────────────────────────────
@@ -351,6 +543,13 @@ ROUTES = [
     ("PATCH", r"/parts/(?P<pid>[^/]+)", update_part),
     ("DELETE", r"/parts/(?P<pid>[^/]+)", delete_part),
     ("GET", r"/stock", stock),
+    ("POST", r"/orders", create_order),
+    ("POST", r"/orders/preview", preview_order),
+    ("GET", r"/orders", list_orders),
+    ("GET", r"/orders/(?P<oid>[^/]+)", get_order),
+    ("PATCH", r"/orders/(?P<oid>[^/]+)", update_order),
+    ("DELETE", r"/orders/(?P<oid>[^/]+)", delete_order),
+    ("POST", r"/orders/(?P<oid>[^/]+)/deliver", deliver_order),
     ("GET", r"/reports/financials", financials),
     ("GET", r"/config", get_config),
 ]

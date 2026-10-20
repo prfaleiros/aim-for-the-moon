@@ -4,7 +4,7 @@ import os
 from decimal import Decimal
 
 import boto3
-from boto3.dynamodb.conditions import Key
+from boto3.dynamodb.conditions import Attr, Key
 
 _table = None
 
@@ -64,6 +64,19 @@ def query_pk(pk: str, sk_prefix: str | None = None) -> list:
 
 def query_gsi1(gsi1pk: str) -> list:
     return _query(IndexName="GSI1", KeyConditionExpression=Key("GSI1PK").eq(gsi1pk))
+
+
+def scan_order_parts() -> list:
+    """Every part that came from an order. One filtered scan: at this volume (hundreds of items) it is
+    cheaper than maintaining a second index; revisit if the table ever grows into the tens of thousands."""
+    kwargs = {"FilterExpression": Attr("PK").begins_with("PART#") & Attr("order_id").exists()}
+    items = []
+    while True:
+        resp = table().scan(**kwargs)
+        items += resp.get("Items", [])
+        if "LastEvaluatedKey" not in resp:
+            return [_from_ddb(i) for i in items]
+        kwargs["ExclusiveStartKey"] = resp["LastEvaluatedKey"]
 
 
 def delete(pk: str, sk: str = "META"):

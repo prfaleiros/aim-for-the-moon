@@ -1,7 +1,8 @@
 """Build/part persistence. Keys:
 BUILD  PK=BUILD#id SK=META   GSI1PK=BUILDS            GSI1SK=<status>#<id>
 PRICE  PK=BUILD#id SK=PRICE#<ts>
-PART   PK=PART#id  SK=META   GSI1PK=BUILD#<id>|STOCK  GSI1SK=PART#<id>
+PART   PK=PART#id  SK=META   GSI1PK=BUILD#<id>|STOCK  GSI1SK=PART#<id>   (order_id -> its ORDER)
+ORDER  PK=ORDER#id SK=META   GSI1PK=ORDERS           GSI1SK=<order_date>#<id>
 """
 import os
 import time
@@ -19,6 +20,13 @@ def build_item(b: dict) -> dict:
     b["PK"], b["SK"] = f"BUILD#{b['id']}", "META"
     b["GSI1PK"], b["GSI1SK"] = "BUILDS", f"{b['status']}#{b['id']}"
     return b
+
+
+def order_item(o: dict) -> dict:
+    o = dict(o)
+    o["PK"], o["SK"] = f"ORDER#{o['id']}", "META"
+    o["GSI1PK"], o["GSI1SK"] = "ORDERS", f"{o['order_date']}#{o['id']}"
+    return o
 
 
 def part_item(p: dict) -> dict:
